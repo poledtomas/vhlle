@@ -5,7 +5,6 @@
 #include <iostream>
 #include <sstream>
 #include <cstring>
-
 #include "eos.h"
 #include "eoChiral.h"
 #include "fld.h"
@@ -16,7 +15,7 @@
 using namespace std;
 
 IcTrento3d::IcTrento3d(Fluid* f, const char* filename, double _tau0, const char* setup) {
- cout << "loading TRENTO IC\n";
+ cout << "loading TRENTO3d IC\n";
  nx = f->getNX();
  ny = f->getNY();
  nz = f->getNZ();
@@ -29,9 +28,27 @@ IcTrento3d::IcTrento3d(Fluid* f, const char* filename, double _tau0, const char*
  ymax = f->getY(ny - 1);
  zmin = f->getZ(0);
  zmax = f->getZ(nz - 1);
-
  tau0 = _tau0;
 
+if(strcmp(setup,"LHC276")==0) {
+  sNN = 2760;
+  cout << "IcTrento3d: setup for 2.76 TeV LHC\n";
+ } else if(strcmp(setup,"RHIC200")==0) {
+  sNN = 200;
+  cout << "IcTrento3d: setup for 200 GeV RHIC\n";
+ } else if(strcmp(setup,"LHC5020")==0) {
+  sNN = 5020;
+  cout << "IcTrento3d: setup for 5.02 TeV LHC\n";
+ } else if(strcmp(setup,"RHIC62")==0) {
+  sNN = 62.4;
+    cout << "IcTrento3d: setup for 62.4 GeV RHIC\n";
+ } else if(strcmp(setup,"RHIC27")==0) {
+  sNN = 27;
+  cout << "IcTrento3d: setup for 27 GeV RHIC\n";
+ } else {
+  cout << "IcTrento: optional parameter LHC276 or RHIC200 is expected\n";
+  exit(0);
+ }
  rho = new double**[nx];
  for (int ix = 0; ix < nx; ix++) {
   rho[ix] = new double*[ny];
@@ -75,6 +92,7 @@ IcTrento3d::IcTrento3d(Fluid* f, const char* filename, double _tau0, const char*
   for (int i = 0; i < 5; i++) { // read the rest 5 lines from header
    getline(fin, line);
   }
+
   getline(fin, line); // read grid-step
   getline(fin, line); // read grid-nsteps
   instream.str(line);
@@ -96,31 +114,34 @@ IcTrento3d::IcTrento3d(Fluid* f, const char* filename, double _tau0, const char*
   instream.str(line);
   instream.seekg(16);
   instream >> etamaxG;
- 
-    // allocate source array 3D - [x,y,eta]
+
+  // allocate source array 3D - [x,y,eta]
   source = new double**[n_grid];
   for (int ix = 0; ix < n_grid; ix++) {
+     source[ix] = new double*[n_grid];
     for (int iy = 0; iy < n_grid; iy++) {
       source[ix][iy] = new double[n_grid_eta];
       for (int eta=0;eta<n_grid_eta;eta++){
         source[ix][iy][eta] = 0.0;
-      }  
+        }  
    }
   }
-
+  
   ymaxG = xmaxG;
   xminG = -xmaxG;
   yminG = -xmaxG;
   etaminG=-etamaxG;
   
-  if (nevents == 0) cout << "Trento IS grid: x,y,etamaxG = " << xmaxG <<" "<< etamaxG << "  n_grid = " << n_grid << " n_grid_eta= "<<n_grid_eta<< endl;
+ if (nevents == 0) cout << "Trento IS grid: x, y, etamaxG = " << xmaxG <<" "<< etamaxG << "  n_grid = " << n_grid << " n_grid_eta= "<<n_grid_eta<< endl;
+  
   for (int iy = 0; iy < n_grid; iy++) {
    for (int ix = 0; ix < n_grid; ix++) {
     for (int eta=0;eta<n_grid_eta;eta++){
-      fin >> source[ix][iy][eta];
+      fin >> source[iy][ix][eta];
+      
     }
    }
-  }
+  }  
   nevents += 1;
   cout << "event " << nevents << "  npart = " << npart << "\n";
   makeSmoothTable(npart);
@@ -139,7 +160,9 @@ IcTrento3d::IcTrento3d(Fluid* f, const char* filename, double _tau0, const char*
  do {
    old_sNorm = sNorm;
    sNorm = pow(setNormalization(npart), 0.75)*old_sNorm;
- } while (abs(sNorm-old_sNorm) > 0.0001);
+   cout<<sNorm<<endl;
+} while (abs(sNorm-old_sNorm) > 0.0001);
+
  cout << "sNorm set to " << sNorm << endl;
  double old_nNorm = 0.0;
  if (sNN < 100) {
@@ -150,6 +173,8 @@ IcTrento3d::IcTrento3d(Fluid* f, const char* filename, double _tau0, const char*
   } while (abs(nNorm-old_nNorm) > 0.0001);
   cout << "nNorm set to " << nNorm << endl;
  }
+
+
 }
 
 IcTrento3d::~IcTrento3d() {
@@ -169,6 +194,7 @@ double IcTrento3d::interpolateGrid(double x, double y,double eta) {
  const double dxG = (xmaxG - xminG) / (n_grid - 1);
  const double dyG = (ymaxG - yminG) / (n_grid - 1);
  const double detaG = (etamaxG - etaminG) / (n_grid_eta - 1);
+
  int ix = (int)((x - xminG) / dxG);
  int iy = (int)((y - yminG) / dyG);
  int ieta = (int)((eta - etaminG) / detaG);
@@ -190,13 +216,14 @@ double IcTrento3d::interpolateGrid(double x, double y,double eta) {
  double weta[2] = {1. - etam / detaG, etam / detaG};
  
  double return_val = 0.;
- for (int jx = 0; jx < 2; jx++){
   for (int jy = 0; jy < 2; jy++) {
-    for (int jeta = 0; jeta < 2; jeta++) {
-   return_val += wx[jx] * wy[jy] * weta[jeta] *source[ix + jx][iy + jy][ieta + jeta];
+ for (int jx = 0; jx < 2; jx++){
+     for (int jeta = 0; jeta < 2; jeta++) {
+   return_val += wx[jx] * wy[jy] * weta[jeta] *source[iy + jy][ix + jx][ieta + jeta];
+          }
+      } 
   }
-  }
-  }
+
  return_val = std::max(return_val, 0.);
  return return_val;
 }
@@ -229,13 +256,15 @@ void IcTrento3d::makeSmoothTable(int npart) {
     if (sNN < 100) {
      baryonGaussian = eta>0 ? exp(-pow(eta - neta0, 2)/(2. * nsigma * nsigma)) : exp(-pow(eta + neta0, 2)/(2. * nsigma * nsigma)) ;
      baryonGaussian /= nsigma*sqrt(2*C_PI);
-     nrho[ix][iy][iz] += interpolateGrid(x,y) * baryonGaussian;
+     nrho[ix][iy][iz] += interpolateGrid(x,y,eta) * baryonGaussian;
     }
     double fEta = 0.;
     if(fabs(eta)<eta0) fEta = 1.0;
     else if (fabs(eta)<ybeam) fEta = exp(-0.5*pow((fabs(eta)-eta0)/sigEta,2));
-    rho[ix][iy][iz] += interpolateGrid(x,y,eta) * fEta;
+    rho[ix][iy][iz] += interpolateGrid(x,y,eta);// * fEta;
+   
  } // Z(eta) loop
+ 
 }
 
 void IcTrento3d::setIC(Fluid* f, EoS* eos) {
@@ -309,20 +338,23 @@ void IcTrento3d::setIC(Fluid* f, EoS* eos) {
       << endl;
  cout << "1/tau*dE/dy_ini: : " << E_midrap/(3.0*dz*tau0) << endl;
  cout << "1/tau*dJ/dy_ini: " << Jy0_midrap/(3.0*dz*tau0) << endl;
- //exit(1);
+
 }
 
 double IcTrento3d::setNormalization(int npart) {
  double e;
  double total_energy = 0.0;
- for (int ix = 0; ix < nx; ix++)
-  for (int iy = 0; iy < ny; iy++)
+
+ for (int ix = 0; ix < nx; ix++){
+  for (int iy = 0; iy < ny; iy++){
    for (int iz = 0; iz < nz; iz++) {
     e = s95p::s95p_e(sNorm * rho[ix][iy][iz] / nevents / dx / dy);
-    double eta = zmin + iz * dz;
-    double coshEta = cosh(eta);
-    total_energy += tau0*e*dx*dy*dz*coshEta;
+    total_energy += tau0*e*dx*dy*dz;
+    
    }
+   }
+   }
+ 
  return npart*0.5*sNN/total_energy;
 }
 
